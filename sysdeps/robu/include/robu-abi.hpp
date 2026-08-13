@@ -240,17 +240,19 @@ inline int64_t setsid_raw(uint64_t *out_sid) {
 	return rc;
 }
 
-inline uint64_t tcgetpgrp_raw() {
+inline uint64_t tcgetpgrp_raw(int vt) {
 	msg_regs m{};
 	m.word[0] = SYS_INFO_CAT_TCGETPGRP;
+	m.word[1] = (uint64_t)vt;
 	ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
 	return m.word[0];
 }
 
-inline void tcsetpgrp_raw(uint64_t pgid) {
+inline void tcsetpgrp_raw(int vt, uint64_t pgid) {
 	msg_regs m{};
 	m.word[0] = SYS_INFO_CAT_TCSETPGRP;
-	m.word[1] = pgid;
+	m.word[1] = (uint64_t)vt;
+	m.word[2] = pgid;
 	ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
 }
 

@@ -1073,7 +1073,6 @@ int Sysdeps<Tcflow>::operator()(int fd, int action) {
 }
 
 int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
-	(void)fd;
 	if (result) {
 		*result = 0;
 	}
@@ -1086,11 +1085,11 @@ int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *re
 		return 0;
 	}
 	if (request == robu::ROBU_TIOCGPGRP) {
-		*(int *)arg = (int)robu::tcgetpgrp_raw();
+		*(int *)arg = (int)robu::tcgetpgrp_raw(fd_to_vt(fd));
 		return 0;
 	}
 	if (request == robu::ROBU_TIOCSPGRP) {
-		robu::tcsetpgrp_raw((uint64_t)(*(int *)arg));
+		robu::tcsetpgrp_raw(fd_to_vt(fd), (uint64_t)(*(int *)arg));
 		return 0;
 	}
 	if (request == robu::ROBU_TIOCSCTTY) {
