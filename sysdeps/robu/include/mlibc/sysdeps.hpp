@@ -46,6 +46,7 @@ struct RobuSysdepTags :
 	Tcsetattr,
 	Tcgetwinsize,
 	Tcsetwinsize,
+	Tcflow,
 	Ioctl,
 	SetPgid,
 	GetPgid,

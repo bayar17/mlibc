@@ -371,6 +371,7 @@ constexpr int64_t VFS_ERR_IS_DIR        = -5;
 constexpr int64_t VFS_ERR_EXISTS        = -6;
 constexpr int64_t VFS_ERR_NOT_DIR       = -7;
 constexpr int64_t VFS_ERR_NOT_EMPTY     = -8;
+constexpr int64_t VFS_ERR_WOULDBLOCK    = -10;
 constexpr int VFS_NAME_MAX  = 20;
 constexpr int VFS_PATH_MAX  = 32;
 constexpr int VFS_READ_MAX  = 40;
@@ -756,9 +757,11 @@ inline int64_t robu_spawn(const char *name, char *const argv[], char *const envp
 	return (int64_t)m.word[0];
 }
 
-inline int64_t exec_raw(const char *name, char *const argv[], char *const envp[]) {
+inline int64_t exec_raw(const char *name, char *const argv[], char *const envp[],
+                          bool (*fd_export)(int fd, uint32_t *kind, uint64_t *handle,
+                                             uint32_t *server_tid)) {
 	static uint8_t buf[SPAWN_REQ_MAX_LEN];
-	int32_t len = build_spawn_req_buf(buf, name, argv, envp, nullptr);
+	int32_t len = build_spawn_req_buf(buf, name, argv, envp, fd_export);
 	if (len < 0) {
 		return -1;
 	}

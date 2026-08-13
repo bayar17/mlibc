@@ -67,6 +67,25 @@ int fd_to_vt(int fd) {
 	return 0;
 }
 
+constexpr int MAX_TRAMPOLINE_SIG = 32;
+volatile int g_sig_interrupt_flag = 0;
+void (*g_real_sig_handlers[MAX_TRAMPOLINE_SIG])(int) = {};
+
+bool sig_check_interrupt() {
+	if (!g_sig_interrupt_flag) {
+		return false;
+	}
+	g_sig_interrupt_flag = 0;
+	return true;
+}
+
+void robu_signal_trampoline(int signum) {
+	g_sig_interrupt_flag = 1;
+	if (signum > 0 && signum < MAX_TRAMPOLINE_SIG && g_real_sig_handlers[signum]) {
+		g_real_sig_handlers[signum](signum);
+	}
+}
+
 int64_t console_handle_cached = -1;
 int64_t console_handle() {
 	if (console_handle_cached < 0) {
@@ -98,6 +117,21 @@ void ensure_stdio_defaults() {
 			g_fds[fd] = { FD_VFS, (uint64_t)console_handle(), 0, robu::devfs_tid() };
 		}
 	}
+}
+
+bool export_std_fd(int fd, uint32_t *kind, uint64_t *handle, uint32_t *server_tid) {
+	ensure_stdio_defaults();
+	if (!fd_valid(fd)) return false;
+	if (g_fds[fd].kind == FD_PIPE_READ) {
+		*kind = robu::SPAWN_FD_KIND_PIPE_READ;
+	} else if (g_fds[fd].kind == FD_PIPE_WRITE) {
+		*kind = robu::SPAWN_FD_KIND_PIPE_WRITE;
+	} else {
+		*kind = (uint32_t)g_fds[fd].kind;
+	}
+	*handle = g_fds[fd].handle;
+	*server_tid = g_fds[fd].server_tid;
+	return true;
 }
 
 bool g_fd_inherit_done;
@@ -468,6 +502,9 @@ int Sysdeps<Read>::operator()(int fd, void *buf, size_t count, ssize_t *bytes_re
 	}
 	bool is_console = g_fds[fd].kind == FD_VFS && g_fds[fd].server_tid == robu::devfs_tid() &&
 	                  is_tty_handle(g_fds[fd].handle);
+	if (is_console && sig_check_interrupt()) {
+		return EINTR;
+	}
 	while (total < count) {
 		size_t chunk = count - total;
 		int64_t n;
@@ -475,12 +512,15 @@ int Sysdeps<Read>::operator()(int fd, void *buf, size_t count, ssize_t *bytes_re
 		case FD_VFS: n = robu::vfs_read(g_fds[fd].server_tid, g_fds[fd].handle, p + total, chunk); break;
 		default: return EBADF;
 		}
+		if (is_console && n == robu::VFS_ERR_WOULDBLOCK && total == 0) {
+			robu::ipc_raw(0, 1, robu::IPC_FLAG_NONE, nullptr, nullptr);
+			if (sig_check_interrupt()) {
+				return EINTR;
+			}
+			continue;
+		}
 		if (n < 0) return EIO;
 		if (n == 0) {
-			if (is_console && total == 0) {
-				robu::ipc_raw(0, 1, robu::IPC_FLAG_NONE, nullptr, nullptr);
-				continue;
-			}
 			break;
 		}
 		total += (size_t)n;
@@ -875,7 +915,7 @@ int Sysdeps<Pipe>::operator()(int *fds, int) {
 }
 
 int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
-	int64_t rc = robu::exec_raw(path, argv, envp);
+	int64_t rc = robu::exec_raw(path, argv, envp, export_std_fd);
 	if (rc == robu::IPC_ERR_NOT_FOUND) {
 		return ENOENT;
 	}
@@ -905,10 +945,19 @@ int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusag
 int Sysdeps<Sigaction>::operator()(int signum, const struct sigaction *act, struct sigaction *oldact) {
 	uint64_t new_handler = 0, new_flags = 0, new_mask = 0;
 	int do_set = act ? 1 : 0;
+	uint64_t prev_real_handler = (signum > 0 && signum < MAX_TRAMPOLINE_SIG)
+	                              ? reinterpret_cast<uint64_t>(g_real_sig_handlers[signum]) : 0;
 	if (act) {
-		new_handler = (act->sa_flags & SA_SIGINFO)
+		uint64_t user_handler = (act->sa_flags & SA_SIGINFO)
 		              ? reinterpret_cast<uint64_t>(act->sa_sigaction)
 		              : reinterpret_cast<uint64_t>(act->sa_handler);
+		if (!(act->sa_flags & SA_SIGINFO) && signum > 0 && signum < MAX_TRAMPOLINE_SIG &&
+		    user_handler != (uint64_t)SIG_DFL && user_handler != (uint64_t)SIG_IGN) {
+			g_real_sig_handlers[signum] = act->sa_handler;
+			new_handler = reinterpret_cast<uint64_t>(&robu_signal_trampoline);
+		} else {
+			new_handler = user_handler;
+		}
 		new_flags = (uint64_t)act->sa_flags;
 		new_mask = *reinterpret_cast<const uint64_t *>(&act->sa_mask);
 	}
@@ -920,10 +969,15 @@ int Sysdeps<Sigaction>::operator()(int signum, const struct sigaction *act, stru
 	}
 	if (oldact) {
 		memset(oldact, 0, sizeof(*oldact));
+		uint64_t report_handler = old_handler;
+		if (old_handler == reinterpret_cast<uint64_t>(&robu_signal_trampoline) &&
+		    signum > 0 && signum < MAX_TRAMPOLINE_SIG) {
+			report_handler = prev_real_handler;
+		}
 		if (old_flags & SA_SIGINFO) {
-			oldact->sa_sigaction = reinterpret_cast<void (*)(int, siginfo_t *, void *)>(old_handler);
+			oldact->sa_sigaction = reinterpret_cast<void (*)(int, siginfo_t *, void *)>(report_handler);
 		} else {
-			oldact->sa_handler = reinterpret_cast<void (*)(int)>(old_handler);
+			oldact->sa_handler = reinterpret_cast<void (*)(int)>(report_handler);
 		}
 		oldact->sa_flags = (int)old_flags;
 		*reinterpret_cast<uint64_t *>(&oldact->sa_mask) = old_mask;
@@ -1009,6 +1063,12 @@ int Sysdeps<Tcgetwinsize>::operator()(int fd, struct winsize *winsz) {
 int Sysdeps<Tcsetwinsize>::operator()(int fd, const struct winsize *winsz) {
 	(void)fd;
 	(void)winsz;
+	return 0;
+}
+
+int Sysdeps<Tcflow>::operator()(int fd, int action) {
+	(void)fd;
+	(void)action;
 	return 0;
 }
 
@@ -1103,6 +1163,9 @@ int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_se
 		? (uint64_t)timeout->tv_sec * 100 + (uint64_t)timeout->tv_nsec / 10000000
 		: 0;
 
+	if (is_console && sig_check_interrupt()) {
+		return EINTR;
+	}
 	for (;;) {
 		bool ready = is_console ? robu::vfs_peek(robu::devfs_tid(), g_fds[fd].handle) > 0 : true;
 		if (ready) {
@@ -1116,6 +1179,9 @@ int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_se
 				return 0;
 			}
 			ticks_left--;
+		}
+		if (is_console && sig_check_interrupt()) {
+			return EINTR;
 		}
 		robu::sleep_raw(1);
 	}
