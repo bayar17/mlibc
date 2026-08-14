@@ -51,6 +51,15 @@ constexpr uint64_t SYS_INFO_CAT_SHM_GET = 25;
 constexpr uint64_t SYS_INFO_CAT_SHM_AT = 26;
 constexpr uint64_t SYS_INFO_CAT_SHM_DT = 27;
 constexpr uint64_t SYS_INFO_CAT_SHM_CTL = 28;
+constexpr uint64_t SYS_INFO_CAT_SOCK_CREATE = 29;
+constexpr uint64_t SYS_INFO_CAT_SOCK_BIND = 30;
+constexpr uint64_t SYS_INFO_CAT_SOCK_LISTEN = 31;
+constexpr uint64_t SYS_INFO_CAT_SOCK_CONNECT = 32;
+constexpr uint64_t SYS_INFO_CAT_SOCK_ACCEPT = 33;
+constexpr uint64_t SYS_INFO_CAT_SOCK_READ = 34;
+constexpr uint64_t SYS_INFO_CAT_SOCK_WRITE = 35;
+constexpr uint64_t SYS_INFO_CAT_SOCK_CLOSE = 36;
+constexpr int SOCK_PATH_MAX = 32;
 
 constexpr int64_t IPC_ERR_NONE = 0;
 constexpr int64_t IPC_ERR_NOT_FOUND = -1;
@@ -846,6 +855,123 @@ inline int64_t shmctl_raw(int shmid, int cmd, msg_regs *reply) {
 		*reply = m;
 	}
 	return rc;
+}
+
+inline void sock_pack_path(const char *path, uint64_t words[4]) {
+	for (int i = 0; i < 4; i++) {
+		words[i] = 0;
+	}
+	for (int i = 0; i < SOCK_PATH_MAX && path[i]; i++) {
+		words[i / 8] |= ((uint64_t)(uint8_t)path[i]) << (8 * (i % 8));
+	}
+}
+
+inline int64_t sock_create_raw(int domain, int type, int *out_id) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SOCK_CREATE;
+	m.word[1] = (uint64_t)(int64_t)domain;
+	m.word[2] = (uint64_t)(int64_t)type;
+	int64_t rc = ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+	if (rc == IPC_ERR_NONE && out_id) {
+		*out_id = (int)(int64_t)m.word[0];
+	}
+	return rc;
+}
+
+inline int64_t sock_bind_raw(int sockid, const char *path) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SOCK_BIND;
+	m.word[1] = (uint64_t)(int64_t)sockid;
+	uint64_t pwords[4];
+	sock_pack_path(path, pwords);
+	m.word[2] = pwords[0];
+	m.word[3] = pwords[1];
+	m.word[4] = pwords[2];
+	m.word[5] = pwords[3];
+	return ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+}
+
+inline int64_t sock_listen_raw(int sockid, int backlog) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SOCK_LISTEN;
+	m.word[1] = (uint64_t)(int64_t)sockid;
+	m.word[2] = (uint64_t)(int64_t)backlog;
+	return ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+}
+
+inline int64_t sock_connect_raw(int sockid, const char *path) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SOCK_CONNECT;
+	m.word[1] = (uint64_t)(int64_t)sockid;
+	uint64_t pwords[4];
+	sock_pack_path(path, pwords);
+	m.word[2] = pwords[0];
+	m.word[3] = pwords[1];
+	m.word[4] = pwords[2];
+	m.word[5] = pwords[3];
+	return ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+}
+
+inline int64_t sock_accept_raw(int sockid, int *out_new_id) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SOCK_ACCEPT;
+	m.word[1] = (uint64_t)(int64_t)sockid;
+	int64_t rc = ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+	if (rc == IPC_ERR_NONE && out_new_id) {
+		*out_new_id = (int)(int64_t)m.word[0];
+	}
+	return rc;
+}
+
+inline int64_t sock_read_raw(int sockid, void *buf, uint64_t max, uint64_t *out_len) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SOCK_READ;
+	m.word[1] = (uint64_t)(int64_t)sockid;
+	m.word[2] = max;
+	int64_t rc = ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+	if (rc == IPC_ERR_NONE) {
+		uint64_t n = m.word[0];
+		if (n > max) {
+			n = max;
+		}
+		uint8_t *p = (uint8_t *)buf;
+		uint64_t words[5] = { m.word[1], m.word[2], m.word[3], m.word[4], m.word[5] };
+		for (uint64_t i = 0; i < n; i++) {
+			p[i] = (uint8_t)(words[i / 8] >> (8 * (i % 8)));
+		}
+		if (out_len) {
+			*out_len = n;
+		}
+	}
+	return rc;
+}
+
+inline int64_t sock_write_raw(int sockid, const void *buf, uint64_t len, uint64_t *out_len) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SOCK_WRITE;
+	m.word[1] = (uint64_t)(int64_t)sockid;
+	uint64_t chunk = len > 24 ? 24 : len;
+	m.word[2] = chunk;
+	const uint8_t *p = (const uint8_t *)buf;
+	uint64_t words[3] = {0, 0, 0};
+	for (uint64_t i = 0; i < chunk; i++) {
+		words[i / 8] |= ((uint64_t)p[i]) << (8 * (i % 8));
+	}
+	m.word[3] = words[0];
+	m.word[4] = words[1];
+	m.word[5] = words[2];
+	int64_t rc = ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+	if (rc == IPC_ERR_NONE && out_len) {
+		*out_len = m.word[0];
+	}
+	return rc;
+}
+
+inline int64_t sock_close_raw(int sockid) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SOCK_CLOSE;
+	m.word[1] = (uint64_t)(int64_t)sockid;
+	return ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
 }
 
 }

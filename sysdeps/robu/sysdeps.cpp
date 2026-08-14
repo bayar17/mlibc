@@ -7,6 +7,8 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <dirent.h>
 #include <bits/winsize.h>
 #include <mlibc/all-sysdeps.hpp>
@@ -25,6 +27,7 @@ enum FdKind {
 	FD_PIPE_READ,
 	FD_PIPE_WRITE,
 	FD_VFS,
+	FD_SOCKET,
 };
 
 constexpr int MAX_FDS = 64;
@@ -426,6 +429,7 @@ int Sysdeps<Close>::operator()(int fd) {
 		case FD_PIPE_READ: robu::pipe_close_raw(g_fds[fd].handle, 0); break;
 		case FD_PIPE_WRITE: robu::pipe_close_raw(g_fds[fd].handle, 1); break;
 		case FD_VFS: robu::vfs_close(g_fds[fd].server_tid, g_fds[fd].handle); break;
+		case FD_SOCKET: robu::sock_close_raw((int)g_fds[fd].handle); break;
 		default: break;
 		}
 	}
@@ -446,6 +450,28 @@ int Sysdeps<Write>::operator()(int fd, const void *buf, size_t count, ssize_t *b
 			int64_t rc = robu::pipe_write_raw(g_fds[fd].handle, p + total, count - total, &n);
 			if (rc == robu::IPC_ERR_NOT_FOUND) {
 				return total > 0 ? 0 : EPIPE;
+			}
+			if (rc != robu::IPC_ERR_NONE) {
+				return total > 0 ? 0 : EIO;
+			}
+			if (n == 0) {
+				robu::ipc_raw(0, 1, robu::IPC_FLAG_NONE, nullptr, nullptr);
+				continue;
+			}
+			total += (size_t)n;
+		}
+		*bytes_written = (ssize_t)total;
+		return 0;
+	}
+	if (g_fds[fd].kind == FD_SOCKET) {
+		while (total < count) {
+			uint64_t n = 0;
+			int64_t rc = robu::sock_write_raw((int)g_fds[fd].handle, p + total, count - total, &n);
+			if (rc == robu::IPC_ERR_NOT_FOUND) {
+				return total > 0 ? 0 : EPIPE;
+			}
+			if (rc == robu::IPC_ERR_INVALID) {
+				return total > 0 ? 0 : ENOTCONN;
 			}
 			if (rc != robu::IPC_ERR_NONE) {
 				return total > 0 ? 0 : EIO;
@@ -493,6 +519,26 @@ int Sysdeps<Read>::operator()(int fd, void *buf, size_t count, ssize_t *bytes_re
 		if (rc == robu::IPC_ERR_NOT_FOUND) {
 			*bytes_read = 0;
 			return 0;
+		}
+		if (rc != robu::IPC_ERR_NONE) {
+			return EIO;
+		}
+		*bytes_read = (ssize_t)n;
+		return 0;
+	}
+	if (g_fds[fd].kind == FD_SOCKET) {
+		uint64_t n = 0;
+		int64_t rc = robu::sock_read_raw((int)g_fds[fd].handle, p, count, &n);
+		while (rc == robu::IPC_ERR_WOULDBLOCK) {
+			robu::ipc_raw(0, 1, robu::IPC_FLAG_NONE, nullptr, nullptr);
+			rc = robu::sock_read_raw((int)g_fds[fd].handle, p, count, &n);
+		}
+		if (rc == robu::IPC_ERR_NOT_FOUND) {
+			*bytes_read = 0;
+			return 0;
+		}
+		if (rc == robu::IPC_ERR_INVALID) {
+			return ENOTCONN;
 		}
 		if (rc != robu::IPC_ERR_NONE) {
 			return EIO;
@@ -805,6 +851,132 @@ int Sysdeps<Shmctl>::operator()(int *idx, int shmid, int cmd, struct shmid_ds *b
 	}
 	if (idx) {
 		*idx = 0;
+	}
+	return 0;
+}
+
+static int extract_unix_path(const struct sockaddr *addr_ptr, socklen_t addr_length, char out[robu::SOCK_PATH_MAX]) {
+	if (!addr_ptr || addr_length < sizeof(sa_family_t)) {
+		return EINVAL;
+	}
+	const struct sockaddr_un *un = (const struct sockaddr_un *)addr_ptr;
+	if (un->sun_family != AF_UNIX) {
+		return EAFNOSUPPORT;
+	}
+	size_t path_len = addr_length - offsetof(struct sockaddr_un, sun_path);
+	size_t n = strnlen(un->sun_path, path_len);
+	if (n >= (size_t)robu::SOCK_PATH_MAX) {
+		return ENAMETOOLONG;
+	}
+	memcpy(out, un->sun_path, n);
+	out[n] = '\0';
+	return 0;
+}
+
+int Sysdeps<Socket>::operator()(int family, int type, int protocol, int *fd) {
+	(void)protocol;
+	if (family != AF_UNIX) {
+		return EAFNOSUPPORT;
+	}
+	if ((type & 0xFF) != SOCK_STREAM) {
+		return EPROTONOSUPPORT;
+	}
+	int sockid = -1;
+	int64_t rc = robu::sock_create_raw(family, type & 0xFF, &sockid);
+	if (rc != robu::IPC_ERR_NONE) {
+		return rc == robu::IPC_ERR_NO_SPACE ? EMFILE : EINVAL;
+	}
+	int newfd = alloc_fd();
+	if (newfd < 0) {
+		robu::sock_close_raw(sockid);
+		return EMFILE;
+	}
+	g_fds[newfd] = { FD_SOCKET, (uint64_t)(int64_t)sockid, 0, 0 };
+	*fd = newfd;
+	return 0;
+}
+
+int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
+	if (!fd_valid(fd) || g_fds[fd].kind != FD_SOCKET) {
+		return EBADF;
+	}
+	char path[robu::SOCK_PATH_MAX];
+	int e = extract_unix_path(addr_ptr, addr_length, path);
+	if (e) {
+		return e;
+	}
+	int64_t rc = robu::sock_bind_raw((int)g_fds[fd].handle, path);
+	if (rc == robu::IPC_ERR_NONE) {
+		return 0;
+	}
+	if (rc == robu::IPC_ERR_EXISTS) {
+		return EADDRINUSE;
+	}
+	return EINVAL;
+}
+
+int Sysdeps<Listen>::operator()(int fd, int backlog) {
+	if (!fd_valid(fd) || g_fds[fd].kind != FD_SOCKET) {
+		return EBADF;
+	}
+	int64_t rc = robu::sock_listen_raw((int)g_fds[fd].handle, backlog);
+	return rc == robu::IPC_ERR_NONE ? 0 : EINVAL;
+}
+
+int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
+	if (!fd_valid(fd) || g_fds[fd].kind != FD_SOCKET) {
+		return EBADF;
+	}
+	char path[robu::SOCK_PATH_MAX];
+	int e = extract_unix_path(addr_ptr, addr_length, path);
+	if (e) {
+		return e;
+	}
+	int64_t rc = robu::sock_connect_raw((int)g_fds[fd].handle, path);
+	if (rc == robu::IPC_ERR_WOULDBLOCK) {
+		while (rc == robu::IPC_ERR_WOULDBLOCK) {
+			robu::ipc_raw(0, 1, robu::IPC_FLAG_NONE, nullptr, nullptr);
+			rc = robu::sock_connect_raw((int)g_fds[fd].handle, path);
+		}
+	}
+	if (rc == robu::IPC_ERR_NONE) {
+		return 0;
+	}
+	if (rc == robu::IPC_ERR_NOT_FOUND) {
+		return ECONNREFUSED;
+	}
+	return EINVAL;
+}
+
+int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr_ptr, socklen_t *addr_length, int flags) {
+	(void)flags;
+	if (!fd_valid(fd) || g_fds[fd].kind != FD_SOCKET) {
+		return EBADF;
+	}
+	int new_sockid = -1;
+	int64_t rc = robu::sock_accept_raw((int)g_fds[fd].handle, &new_sockid);
+	while (rc == robu::IPC_ERR_WOULDBLOCK) {
+		robu::ipc_raw(0, 1, robu::IPC_FLAG_NONE, nullptr, nullptr);
+		rc = robu::sock_accept_raw((int)g_fds[fd].handle, &new_sockid);
+	}
+	if (rc != robu::IPC_ERR_NONE) {
+		return EINVAL;
+	}
+	int fdslot = alloc_fd();
+	if (fdslot < 0) {
+		robu::sock_close_raw(new_sockid);
+		return EMFILE;
+	}
+	g_fds[fdslot] = { FD_SOCKET, (uint64_t)(int64_t)new_sockid, 0, 0 };
+	*newfd = fdslot;
+	if (addr_ptr && addr_length) {
+		socklen_t avail = *addr_length;
+		struct sockaddr_un un{};
+		un.sun_family = AF_UNIX;
+		socklen_t actual = (socklen_t)offsetof(struct sockaddr_un, sun_path);
+		socklen_t to_copy = avail < actual ? avail : actual;
+		memcpy(addr_ptr, &un, to_copy);
+		*addr_length = actual;
 	}
 	return 0;
 }

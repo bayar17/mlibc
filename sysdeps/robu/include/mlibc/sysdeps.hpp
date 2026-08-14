@@ -75,7 +75,12 @@ struct RobuSysdepTags :
 	Shmget,
 	Shmat,
 	Shmdt,
-	Shmctl
+	Shmctl,
+	Socket,
+	Bind,
+	Listen,
+	Connect,
+	Accept
 {};
 
 template<typename Tag>
