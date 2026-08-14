@@ -71,7 +71,11 @@ struct RobuSysdepTags :
 	GetResgid,
 	GetHostname,
 	GetGroups,
-	Fcntl
+	Fcntl,
+	Shmget,
+	Shmat,
+	Shmdt,
+	Shmctl
 {};
 
 template<typename Tag>

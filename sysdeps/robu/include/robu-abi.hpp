@@ -47,10 +47,19 @@ constexpr unsigned long ROBU_TIOCGPGRP = 0x540F;
 constexpr unsigned long ROBU_TIOCSPGRP = 0x5410;
 constexpr unsigned long ROBU_TIOCGWINSZ = 0x5413;
 
+constexpr uint64_t SYS_INFO_CAT_SHM_GET = 25;
+constexpr uint64_t SYS_INFO_CAT_SHM_AT = 26;
+constexpr uint64_t SYS_INFO_CAT_SHM_DT = 27;
+constexpr uint64_t SYS_INFO_CAT_SHM_CTL = 28;
+
 constexpr int64_t IPC_ERR_NONE = 0;
 constexpr int64_t IPC_ERR_NOT_FOUND = -1;
+constexpr int64_t IPC_ERR_NO_CAP = -4;
 constexpr int64_t IPC_ERR_WOULDBLOCK = -5;
 constexpr int64_t IPC_ERR_NO_MEM = -6;
+constexpr int64_t IPC_ERR_EXISTS = -7;
+constexpr int64_t IPC_ERR_NO_SPACE = -8;
+constexpr int64_t IPC_ERR_INVALID = -9;
 
 inline int64_t ipc_raw(uint64_t dest, uint64_t src_or_arg, uint64_t flags,
                         msg_regs *io, uint32_t *from_out) {
@@ -792,6 +801,51 @@ inline int64_t robu_waitpid(int64_t pid, int *status, bool nohang) {
 		*status = ((int)m.word[1] & 0xff) << 8;
 	}
 	return (int64_t)m.word[0];
+}
+
+inline int64_t shmget_raw(int key, uint64_t size, int shmflg, int *out_id) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SHM_GET;
+	m.word[1] = (uint64_t)(int64_t)key;
+	m.word[2] = size;
+	m.word[3] = (uint64_t)(uint32_t)shmflg;
+	int64_t rc = ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+	if (rc == IPC_ERR_NONE && out_id) {
+		*out_id = (int)(int64_t)m.word[0];
+	}
+	return rc;
+}
+
+inline int64_t shmat_raw(int shmid, uint64_t shmaddr, int shmflg, uint64_t *out_va) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SHM_AT;
+	m.word[1] = (uint64_t)(int64_t)shmid;
+	m.word[2] = shmaddr;
+	m.word[3] = (uint64_t)(uint32_t)shmflg;
+	int64_t rc = ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+	if (rc == IPC_ERR_NONE && out_va) {
+		*out_va = m.word[0];
+	}
+	return rc;
+}
+
+inline int64_t shmdt_raw(uint64_t shmaddr) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SHM_DT;
+	m.word[1] = shmaddr;
+	return ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+}
+
+inline int64_t shmctl_raw(int shmid, int cmd, msg_regs *reply) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_SHM_CTL;
+	m.word[1] = (uint64_t)(int64_t)shmid;
+	m.word[2] = (uint64_t)(int64_t)cmd;
+	int64_t rc = ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
+	if (rc == IPC_ERR_NONE && reply) {
+		*reply = m;
+	}
+	return rc;
 }
 
 }

@@ -752,6 +752,63 @@ int Sysdeps<VmUnmap>::operator()(void *, size_t) {
 	return 0;
 }
 
+int Sysdeps<Shmget>::operator()(int *shm_id, key_t key, size_t size, int shmflg) {
+	int id = -1;
+	int64_t rc = robu::shmget_raw((int)key, (uint64_t)size, shmflg, &id);
+	if (rc == robu::IPC_ERR_NONE) {
+		*shm_id = id;
+		return 0;
+	}
+	if (rc == robu::IPC_ERR_NO_MEM) return ENOMEM;
+	if (rc == robu::IPC_ERR_NOT_FOUND) return ENOENT;
+	if (rc == robu::IPC_ERR_EXISTS) return EEXIST;
+	if (rc == robu::IPC_ERR_NO_SPACE) return ENOSPC;
+	return EINVAL;
+}
+
+int Sysdeps<Shmat>::operator()(void **seg_start, int shmid, const void *shmaddr, int shmflg) {
+	if (shmaddr != nullptr) {
+		return EINVAL;
+	}
+	uint64_t va = 0;
+	int64_t rc = robu::shmat_raw(shmid, 0, shmflg, &va);
+	if (rc == robu::IPC_ERR_NONE) {
+		*seg_start = (void *)va;
+		return 0;
+	}
+	if (rc == robu::IPC_ERR_NO_MEM || rc == robu::IPC_ERR_NO_SPACE) return ENOMEM;
+	if (rc == robu::IPC_ERR_NOT_FOUND) return EINVAL;
+	if (rc == robu::IPC_ERR_NO_CAP) return EACCES;
+	return EINVAL;
+}
+
+int Sysdeps<Shmdt>::operator()(const void *shmaddr) {
+	int64_t rc = robu::shmdt_raw((uint64_t)shmaddr);
+	return rc == robu::IPC_ERR_NONE ? 0 : EINVAL;
+}
+
+int Sysdeps<Shmctl>::operator()(int *idx, int shmid, int cmd, struct shmid_ds *buf) {
+	robu::msg_regs reply{};
+	int64_t rc = robu::shmctl_raw(shmid, cmd, &reply);
+	if (rc != robu::IPC_ERR_NONE) {
+		return EINVAL;
+	}
+	if (cmd == IPC_STAT && buf) {
+		memset(buf, 0, sizeof(*buf));
+		buf->shm_segsz = (size_t)reply.word[0];
+		buf->shm_nattch = (shmatt_t)reply.word[1];
+		buf->shm_cpid = (pid_t)(reply.word[2] & 0xFFFFFFFFu);
+		buf->shm_lpid = (pid_t)(reply.word[2] >> 32);
+		buf->shm_perm.mode = (mode_t)(reply.word[3] & 0xFFF);
+		buf->shm_atime = (time_t)reply.word[4];
+		buf->shm_dtime = (time_t)reply.word[5];
+	}
+	if (idx) {
+		*idx = 0;
+	}
+	return 0;
+}
+
 int Sysdeps<FutexWait>::operator()(int *, int, const struct timespec *) {
 	return ENOSYS;
 }
