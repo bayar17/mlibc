@@ -52,6 +52,7 @@ struct RobuSysdepTags :
 	GetPgid,
 	SetSid,
 	Pselect,
+	Poll,
 	GetUid,
 	GetEuid,
 	GetGid,

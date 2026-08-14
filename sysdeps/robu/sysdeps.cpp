@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <poll.h>
 #include <sys/un.h>
 #include <dirent.h>
 #include <bits/winsize.h>
@@ -1409,6 +1410,66 @@ int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_se
 			ticks_left--;
 		}
 		if (is_console && sig_check_interrupt()) {
+			return EINTR;
+		}
+		robu::sleep_raw(1);
+	}
+}
+
+int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t count, int timeout, int *num_events) {
+	ensure_stdio_defaults();
+	bool has_timeout = timeout >= 0;
+	uint64_t ticks_left = has_timeout ? (uint64_t)timeout / 10 : 0;
+	for (;;) {
+		int ready = 0;
+		for (nfds_t i = 0; i < count; i++) {
+			fds[i].revents = 0;
+			int fd = fds[i].fd;
+			if (fd < 0) {
+				continue;
+			}
+			if (!fd_valid(fd)) {
+				fds[i].revents = POLLNVAL;
+				ready++;
+				continue;
+			}
+			bool readable = true;
+			switch (g_fds[fd].kind) {
+			case FD_VFS:
+				readable = robu::vfs_peek(g_fds[fd].server_tid, g_fds[fd].handle) > 0;
+				break;
+			case FD_SOCKET: {
+				uint8_t dummy;
+				uint64_t n = 0;
+				readable = robu::sock_read_raw((int)g_fds[fd].handle, &dummy, 0, &n) == robu::IPC_ERR_NONE;
+				break;
+			}
+			default:
+				readable = true;
+				break;
+			}
+			if ((fds[i].events & POLLIN) && readable) {
+				fds[i].revents |= POLLIN;
+			}
+			if (fds[i].events & POLLOUT) {
+				fds[i].revents |= POLLOUT;
+			}
+			if (fds[i].revents) {
+				ready++;
+			}
+		}
+		if (ready > 0) {
+			*num_events = ready;
+			return 0;
+		}
+		if (has_timeout) {
+			if (ticks_left == 0) {
+				*num_events = 0;
+				return 0;
+			}
+			ticks_left--;
+		}
+		if (sig_check_interrupt()) {
 			return EINTR;
 		}
 		robu::sleep_raw(1);
