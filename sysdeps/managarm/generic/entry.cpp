@@ -75,18 +75,6 @@ SignalGuard::~SignalGuard() {
 	}
 }
 
-void *ShardedSlabPolicy::map(size_t size) {
-	void *ptr;
-	auto e = mlibc::sysdep<AnonAllocate>(size, &ptr);
-	__ensure(!e);
-	return ptr;
-}
-
-void ShardedSlabPolicy::unmap(void *ptr, size_t size) {
-	auto e = mlibc::sysdep<AnonFree>(ptr, size);
-	__ensure(!e);
-}
-
 SysdepsPool &getSysdepsPool() {
 	// Use frg::eternal to prevent a call to __cxa_atexit().
 	// This is necessary because __cxa_atexit() calls this function.
@@ -121,12 +109,12 @@ bool cancellationRequested() {
 	pthread_once(&has_cached_infos, &actuallyCacheInfos);
 	if (!__mlibc_cached_thread_page)
 		return false;
-	return __mlibc_cached_thread_page->cancellationRequested;
-}
-
-void resetCancellationRequested() {
-	pthread_once(&has_cached_infos, &actuallyCacheInfos);
-	__mlibc_cached_thread_page->cancellationRequested = false;
+	auto gsf = __atomic_load_n(&__mlibc_cached_thread_page->globalSignalFlag, __ATOMIC_RELAXED);
+	// Precondition: this function must only be called in a SignalGuard.
+	__ensure(gsf);
+	// globalSignalFlag == 2 means that this thread accepted a signal that is delivery at guard exit.
+	// In-flight cancellable operations must be cancelled so the guard can end.
+	return gsf == 2;
 }
 
 void setQueueHandle(HelHandle queue) {
