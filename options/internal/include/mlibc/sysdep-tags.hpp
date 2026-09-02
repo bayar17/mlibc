@@ -695,6 +695,21 @@ struct CopyFileRange {};
 struct Renameat2 {};
 #endif // __MLIBC_LINUX_OPTION
 
+#if __MLIBC_ROBU_XATTR_OPTION && !__MLIBC_LINUX_OPTION
+struct Setxattr {};
+struct Lsetxattr {};
+struct Fsetxattr {};
+struct Getxattr {};
+struct Lgetxattr {};
+struct Fgetxattr {};
+struct Listxattr {};
+struct Llistxattr {};
+struct Flistxattr {};
+struct Removexattr {};
+struct Lremovexattr {};
+struct Fremovexattr {};
+#endif
+
 #if __MLIBC_LINUX_EPOLL_OPTION
 #include <sys/epoll.h>
 

@@ -18,6 +18,7 @@ struct RobuSysdepTags :
 	FutexWake,
 	FutexWait,
 	Read,
+	Readlink,
 	Open,
 	VmMap,
 	VmUnmap,
@@ -81,7 +82,26 @@ struct RobuSysdepTags :
 	Bind,
 	Listen,
 	Connect,
-	Accept
+	Accept,
+	Access,
+	Fchmod,
+	Chmod,
+	Umask,
+	ClockGetres,
+	GetSockopt,
+	GetEntropy,
+	Setxattr,
+	Lsetxattr,
+	Fsetxattr,
+	Getxattr,
+	Lgetxattr,
+	Fgetxattr,
+	Listxattr,
+	Llistxattr,
+	Flistxattr,
+	Removexattr,
+	Lremovexattr,
+	Fremovexattr
 {};
 
 template<typename Tag>

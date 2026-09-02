@@ -697,6 +697,8 @@ FILE *fopen(const char *path, const char *mode) {
 	return frg::construct<mlibc::fd_file>(getAllocator(), fd,
 			mlibc::file_dispose_cb<mlibc::fd_file>);
 }
+extern "C" FILE *fopen64(const char *, const char *)
+	__attribute__((alias("fopen")));
 
 #if __MLIBC_LINUX_OPTION
 [[gnu::alias("fopen")]] FILE *fopen64(const char *path, const char *mode);

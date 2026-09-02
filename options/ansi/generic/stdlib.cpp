@@ -86,6 +86,8 @@ long double strtold(const char *__restrict string, char **__restrict end) {
 long strtol(const char *__restrict string, char **__restrict end, int base) {
 	return mlibc::stringToInteger<long, char>(string, end, base);
 }
+extern "C" long __isoc23_strtol(const char *__restrict, char **__restrict, int)
+	__attribute__((alias("strtol")));
 long long strtoll(const char *__restrict string, char **__restrict end, int base) {
 	return mlibc::stringToInteger<long long, char>(string, end, base);
 }

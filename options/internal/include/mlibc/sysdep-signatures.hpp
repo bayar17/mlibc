@@ -334,6 +334,21 @@ SYSDEP_FUNC(CopyFileRange, int fd_in, off_t *off_in, int fd_out, off_t *off_out,
 SYSDEP_FUNC(Renameat2, int olddirfd, const char *old_path, int newdirfd, const char *new_path, unsigned int flags);
 #endif // __MLIBC_LINUX_OPTION
 
+#if __MLIBC_ROBU_XATTR_OPTION && !__MLIBC_LINUX_OPTION
+SYSDEP_FUNC(Setxattr, const char *path, const char *name, const void *val, size_t size, int flags);
+SYSDEP_FUNC(Lsetxattr, const char *path, const char *name, const void *val, size_t size, int flags);
+SYSDEP_FUNC(Fsetxattr, int fd, const char *name, const void *val, size_t size, int flags);
+SYSDEP_FUNC(Getxattr, const char *path, const char *name, void *val, size_t size, ssize_t *nread);
+SYSDEP_FUNC(Lgetxattr, const char *path, const char *name, void *val, size_t size, ssize_t *nread);
+SYSDEP_FUNC(Fgetxattr, int fd, const char *name, void *val, size_t size, ssize_t *nread);
+SYSDEP_FUNC(Listxattr, const char *path, char *list, size_t size, ssize_t *nread);
+SYSDEP_FUNC(Llistxattr, const char *path, char *list, size_t size, ssize_t *nread);
+SYSDEP_FUNC(Flistxattr, int fd, char *list, size_t size, ssize_t *nread);
+SYSDEP_FUNC(Removexattr, const char *path, const char *name);
+SYSDEP_FUNC(Lremovexattr, const char *path, const char *name);
+SYSDEP_FUNC(Fremovexattr, int fd, const char *name);
+#endif
+
 #if __MLIBC_LINUX_EPOLL_OPTION
 SYSDEP_FUNC(EpollCreate, int flags, int *fd);
 SYSDEP_FUNC(EpollCtl, int epfd, int mode, int fd, struct epoll_event *ev);

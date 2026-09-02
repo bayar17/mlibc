@@ -59,6 +59,7 @@ constexpr uint64_t SYS_INFO_CAT_SOCK_ACCEPT = 33;
 constexpr uint64_t SYS_INFO_CAT_SOCK_READ = 34;
 constexpr uint64_t SYS_INFO_CAT_SOCK_WRITE = 35;
 constexpr uint64_t SYS_INFO_CAT_SOCK_CLOSE = 36;
+constexpr uint64_t SYS_INFO_CAT_GETENTROPY = 44;
 constexpr int SOCK_PATH_MAX = 32;
 
 constexpr int64_t IPC_ERR_NONE = 0;
@@ -69,6 +70,7 @@ constexpr int64_t IPC_ERR_NO_MEM = -6;
 constexpr int64_t IPC_ERR_EXISTS = -7;
 constexpr int64_t IPC_ERR_NO_SPACE = -8;
 constexpr int64_t IPC_ERR_INVALID = -9;
+constexpr int64_t IPC_ERR_NOT_SUPPORTED = -11;
 
 inline int64_t ipc_raw(uint64_t dest, uint64_t src_or_arg, uint64_t flags,
                         msg_regs *io, uint32_t *from_out) {
@@ -167,6 +169,14 @@ inline uint64_t self_tid() {
 	msg_regs m{};
 	ipc_raw(0, 0, IPC_FLAG_SELF_TID, &m, nullptr);
 	return m.word[0];
+}
+
+inline int64_t getentropy_raw(void *buffer, uint64_t length) {
+	msg_regs m{};
+	m.word[0] = SYS_INFO_CAT_GETENTROPY;
+	m.word[1] = (uint64_t)buffer;
+	m.word[2] = length;
+	return ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, nullptr);
 }
 
 inline int64_t sig_action_raw(int signum, uint64_t new_handler, uint64_t new_flags,
@@ -277,7 +287,7 @@ inline void tcsetpgrp_raw(int vt, uint64_t pgid) {
 constexpr uint64_t KINFO_VA = 0x0000000080000000ULL;
 
 constexpr int MOUNT_PREFIX_MAX = 24;
-constexpr int MOUNT_TABLE_MAX = 8;
+constexpr int MOUNT_TABLE_MAX = 16;
 struct mount_entry {
 	uint32_t in_use;
 	uint32_t owner_tid;
@@ -301,6 +311,8 @@ struct kinfo_page {
 	uint32_t abitest_exit_helper_tid;
 	uint32_t procfs_tid;
 	uint32_t sysfs_tid;
+	uint32_t blockdrv_tid;
+	uint32_t ext2fs_tid;
 	mount_entry mounts[MOUNT_TABLE_MAX];
 	volatile uint32_t mount_seq;
 };
@@ -383,6 +395,10 @@ constexpr uint64_t VFS_OP_MKDIR   = 13;
 constexpr uint64_t VFS_OP_RMDIR   = 14;
 constexpr uint64_t VFS_OP_LINK    = 15;
 constexpr uint64_t VFS_OP_MKNOD   = 16;
+constexpr uint64_t VFS_OP_CAPS    = 18;
+constexpr uint64_t VFS_OP_XATTR   = 19;
+constexpr uint64_t VFS_OP_UTIMENS = 20;
+constexpr uint64_t VFS_OP_SEEK    = 22;
 constexpr int64_t VFS_ERR_NOT_FOUND     = -1;
 constexpr int64_t VFS_ERR_BAD_HANDLE    = -2;
 constexpr int64_t VFS_ERR_NOT_SUPPORTED = -3;
@@ -392,6 +408,14 @@ constexpr int64_t VFS_ERR_EXISTS        = -6;
 constexpr int64_t VFS_ERR_NOT_DIR       = -7;
 constexpr int64_t VFS_ERR_NOT_EMPTY     = -8;
 constexpr int64_t VFS_ERR_WOULDBLOCK    = -10;
+constexpr int64_t VFS_ERR_INVALID       = -9;
+constexpr int VFS_XATTR_NAME_MAX = 255;
+constexpr int VFS_XATTR_VALUE_MAX = 1024;
+constexpr uint64_t VFS_XATTR_GET = 1;
+constexpr uint64_t VFS_XATTR_SET = 2;
+constexpr uint64_t VFS_XATTR_LIST = 3;
+constexpr uint64_t VFS_XATTR_REMOVE = 4;
+constexpr uint64_t VFS_XATTR_FLAGS_SHIFT = 32;
 constexpr int VFS_NAME_MAX  = 20;
 constexpr int VFS_PATH_MAX  = 32;
 constexpr int VFS_READ_MAX  = 40;
@@ -400,6 +424,18 @@ constexpr uint64_t VFS_ROOT_INO = 1;
 constexpr uint64_t VFS_O_CREAT  = 0x0040;
 constexpr uint64_t VFS_O_TRUNC  = 0x0200;
 constexpr uint64_t VFS_O_APPEND = 0x0400;
+constexpr uint64_t VFS_UTIME_OMIT_ATIME = 1;
+constexpr uint64_t VFS_UTIME_OMIT_MTIME = 2;
+constexpr int VFS_NODE_REG = 0;
+constexpr int VFS_NODE_DIR = 1;
+constexpr int VFS_NODE_BLOCK = 2;
+constexpr int VFS_NODE_CHAR = 3;
+constexpr uint64_t DEVFS_BLOCK_HANDLE_BASE = 0x100;
+constexpr uint64_t VFS_SEEK_SET = 0;
+constexpr uint64_t VFS_SEEK_CUR = 1;
+constexpr uint64_t VFS_SEEK_END = 2;
+constexpr uint64_t VFS_FEATURE_TIMESTAMPS = 1ULL << 9;
+constexpr unsigned long ROBU_BLKGETSIZE64 = 0x80081272UL;
 
 inline int64_t vfs_open(uint32_t server, const char *path, uint64_t flags) {
 	msg_regs m{};
@@ -428,6 +464,19 @@ inline int64_t vfs_read(uint32_t server, uint64_t handle, void *buf, uint64_t le
 		}
 	}
 	return status;
+}
+
+inline int64_t vfs_seek(uint32_t server, uint64_t handle, int64_t offset,
+		uint64_t whence, uint64_t *offset_out) {
+	msg_regs m{};
+	m.word[0] = VFS_OP_SEEK;
+	m.word[1] = handle;
+	m.word[2] = (uint64_t)offset;
+	m.word[3] = whence;
+	uint32_t from;
+	ipc_call(server, &m, &from);
+	if (offset_out) *offset_out = m.word[1];
+	return (int64_t)m.word[0];
 }
 
 inline int64_t vfs_peek(uint32_t server, uint64_t handle) {
@@ -465,7 +514,7 @@ inline int64_t vfs_close(uint32_t server, uint64_t handle) {
 }
 
 inline int64_t vfs_stat(uint32_t server, const char *path, uint64_t *size_out, int *is_dir_out,
-                        uint64_t *ino_out) {
+                        uint64_t *ino_out, int64_t *atime_out = nullptr, int64_t *mtime_out = nullptr) {
 	msg_regs m{};
 	m.word[0] = VFS_OP_STAT;
 	msg_put_str(m, 1, path, VFS_PATH_MAX);
@@ -476,12 +525,14 @@ inline int64_t vfs_stat(uint32_t server, const char *path, uint64_t *size_out, i
 		if (size_out) *size_out = m.word[1];
 		if (is_dir_out) *is_dir_out = (int)m.word[2];
 		if (ino_out) *ino_out = m.word[3];
+		if (atime_out) *atime_out = (int64_t)m.word[4];
+		if (mtime_out) *mtime_out = (int64_t)m.word[5];
 	}
 	return status;
 }
 
 inline int64_t vfs_fstat(uint32_t server, uint64_t handle, uint64_t *size_out, int *is_dir_out,
-                         uint64_t *ino_out) {
+                         uint64_t *ino_out, int64_t *atime_out = nullptr, int64_t *mtime_out = nullptr) {
 	msg_regs m{};
 	m.word[0] = VFS_OP_FSTAT;
 	m.word[1] = handle;
@@ -492,6 +543,8 @@ inline int64_t vfs_fstat(uint32_t server, uint64_t handle, uint64_t *size_out, i
 		if (size_out) *size_out = m.word[1];
 		if (is_dir_out) *is_dir_out = (int)m.word[2];
 		if (ino_out) *ino_out = m.word[3];
+		if (atime_out) *atime_out = (int64_t)m.word[4];
+		if (mtime_out) *mtime_out = (int64_t)m.word[5];
 	}
 	return status;
 }
@@ -573,6 +626,47 @@ inline int64_t vfs_mknod(uint32_t server, const char *name, uint64_t mode, uint6
 inline int64_t vfs_quiesce(uint32_t server) {
 	msg_regs m{};
 	m.word[0] = VFS_OP_QUIESCE;
+	uint32_t from;
+	ipc_call(server, &m, &from);
+	return (int64_t)m.word[0];
+}
+
+inline int64_t vfs_caps(uint32_t server, uint64_t *abi_out, uint64_t *features_out) {
+	msg_regs m{};
+	m.word[0] = VFS_OP_CAPS;
+	uint32_t from;
+	ipc_call(server, &m, &from);
+	if((int64_t)m.word[0] == 0) {
+		if(abi_out) *abi_out = m.word[1];
+		if(features_out) *features_out = m.word[2];
+	}
+	return (int64_t)m.word[0];
+}
+
+inline int64_t vfs_xattr(uint32_t server, uint64_t command, uint64_t handle, int shmid,
+		uint64_t name_len, uint64_t value_len, uint64_t *value_len_out) {
+	msg_regs m{};
+	m.word[0] = VFS_OP_XATTR;
+	m.word[1] = command;
+	m.word[2] = handle;
+	m.word[3] = (uint64_t)(int64_t)shmid;
+	m.word[4] = name_len;
+	m.word[5] = value_len;
+	uint32_t from;
+	ipc_call(server, &m, &from);
+	if (value_len_out) *value_len_out = m.word[1];
+	return (int64_t)m.word[0];
+}
+
+inline int64_t vfs_utimens(uint32_t server, uint64_t handle, uint64_t flags,
+		int64_t atime, int64_t mtime, int64_t ctime) {
+	msg_regs m{};
+	m.word[0] = VFS_OP_UTIMENS;
+	m.word[1] = handle;
+	m.word[2] = flags;
+	m.word[3] = (uint64_t)atime;
+	m.word[4] = (uint64_t)mtime;
+	m.word[5] = (uint64_t)ctime;
 	uint32_t from;
 	ipc_call(server, &m, &from);
 	return (int64_t)m.word[0];

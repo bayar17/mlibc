@@ -3,18 +3,41 @@ sysdep_supported_options = {
 	'glibc': true,
 }
 
-rtld_sources += files(
-	'sysdeps.cpp',
+robu_sysdeps_sources = files(
+	'sysdeps_core.cpp',
+	'sysdeps_vfs.cpp',
+	'sysdeps_process.cpp',
+	'sysdeps_signal.cpp',
+	'sysdeps_termios.cpp',
+	'sysdeps_ipc.cpp',
+	'sysdeps_xattr.cpp',
+	'sysdeps_random.cpp',
+	'sysdeps_sysinfo.cpp',
 )
+
+rtld_sources += robu_sysdeps_sources
 rtld_include_dirs += include_directories('include')
 
-libc_sources += files(
-	'entry.cpp',
-	'sysdeps.cpp',
-)
+libc_sources += files('entry.cpp') + robu_sysdeps_sources
 libc_include_dirs += include_directories('include')
 
 if not no_headers
+	install_headers(
+		'include/sys/xattr.h',
+		subdir: 'sys'
+	)
+	install_headers(
+		'include/sys/random.h',
+		subdir: 'sys'
+	)
+	install_headers(
+		'include/sys/sysinfo.h',
+		subdir: 'sys'
+	)
+	install_headers(
+		'include/robu/vfs.h',
+		subdir: 'robu'
+	)
 	install_headers(
 		'include/abi-bits/auxv.h',
 		'include/abi-bits/blkcnt_t.h',

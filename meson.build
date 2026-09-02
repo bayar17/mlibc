@@ -347,6 +347,8 @@ linux_signalfd_option = sysdep_supported_options.get('linux-signalfd', linux_opt
 linux_eventfd_option = sysdep_supported_options.get('linux-eventfd', linux_option)
 linux_reboot_option = sysdep_supported_options.get('linux-reboot', linux_option)
 linux_wrappers_option = linux_option and sysdep_supported_options.get('linux_wrappers', false)
+robu_xattr_option = host_machine.system() == 'robu'
+robu_random_option = host_machine.system() == 'robu'
 
 mlibc_conf.set10('__MLIBC_POSIX_OPTION', posix_option)
 mlibc_conf.set10('__MLIBC_LINUX_OPTION', linux_option)
@@ -359,6 +361,8 @@ mlibc_conf.set10('__MLIBC_LINUX_SIGNALFD_OPTION', linux_signalfd_option)
 mlibc_conf.set10('__MLIBC_LINUX_EVENTFD_OPTION', linux_eventfd_option)
 mlibc_conf.set10('__MLIBC_LINUX_REBOOT_OPTION', linux_reboot_option)
 mlibc_conf.set10('__MLIBC_LINUX_WRAPPERS_OPTION', linux_wrappers_option)
+mlibc_conf.set10('__MLIBC_ROBU_XATTR_OPTION', robu_xattr_option)
+mlibc_conf.set10('__MLIBC_ROBU_RANDOM_OPTION', robu_random_option)
 mlibc_conf.set10('__MLIBC_SYSDEP_HAS_BITS_SYSCALL_H', provides_bits_syscall_h)
 
 rtld_include_dirs += include_directories('options/ansi/include')
