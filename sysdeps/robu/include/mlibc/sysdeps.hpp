@@ -63,6 +63,7 @@ struct RobuSysdepTags :
 	Mkdir,
 	Rmdir,
 	Unlinkat,
+	Rename,
 	Link,
 	Mknodat,
 	Sync,

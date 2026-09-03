@@ -168,6 +168,8 @@ int vfs_err_to_errno(int64_t status) {
 	case robu::VFS_ERR_NOT_EMPTY: return ENOTEMPTY;
 	case robu::VFS_ERR_NOT_SUPPORTED: return ENOTSUP;
 	case robu::VFS_ERR_NO_SPACE: return ENOSPC;
+	case robu::VFS_ERR_INVALID: return EINVAL;
+	case robu::VFS_ERR_WOULDBLOCK: return EBUSY;
 	default: return EIO;
 	}
 }
@@ -523,6 +525,22 @@ int Sysdeps<Unlinkat>::operator()(int, const char *path, int) {
 	uint32_t mount_tid = resolve_mount_for_dir(resolved, &rel);
 	if (mount_tid == 0) return ENOENT;
 	return vfs_err_to_errno(robu::vfs_unlink(mount_tid, rel));
+}
+
+int Sysdeps<Rename>::operator()(const char *old_path, const char *new_path) {
+	if (!old_path || !new_path) return EFAULT;
+	char old_resolved[CWD_MAX], new_resolved[CWD_MAX];
+	resolve_path(old_path, old_resolved, sizeof(old_resolved));
+	resolve_path(new_path, new_resolved, sizeof(new_resolved));
+	const char *old_rel;
+	const char *new_rel;
+	uint32_t old_tid = resolve_mount_for_dir(old_resolved, &old_rel);
+	uint32_t new_tid = resolve_mount_for_dir(new_resolved, &new_rel);
+	if (old_tid == 0 || new_tid == 0) return ENOENT;
+	if (old_tid != new_tid) return EXDEV;
+	if (strlen(old_rel) >= (size_t)robu::VFS_NAME_MAX ||
+			strlen(new_rel) >= (size_t)robu::VFS_NAME_MAX) return ENAMETOOLONG;
+	return vfs_err_to_errno(robu::vfs_rename(old_tid, old_rel, new_rel));
 }
 
 int Sysdeps<Link>::operator()(const char *old_path, const char *new_path) {

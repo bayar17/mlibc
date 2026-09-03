@@ -570,6 +570,21 @@ inline int64_t vfs_readdir(uint32_t server, uint64_t dir_ino, uint64_t index, ch
 	return status;
 }
 
+inline int64_t vfs_rename(uint32_t server, const char *oldname, const char *newname) {
+	msg_regs m{};
+	m.word[0] = VFS_OP_RENAME;
+	char *bytes = reinterpret_cast<char *>(&m);
+	int i = 0;
+	for (; i < VFS_NAME_MAX - 1 && oldname[i]; i++) bytes[8 + i] = oldname[i];
+	bytes[8 + i] = '\0';
+	i = 0;
+	for (; i < VFS_NAME_MAX - 1 && newname[i]; i++) bytes[8 + VFS_NAME_MAX + i] = newname[i];
+	bytes[8 + VFS_NAME_MAX + i] = '\0';
+	uint32_t from;
+	ipc_call(server, &m, &from);
+	return (int64_t)m.word[0];
+}
+
 inline int64_t vfs_unlink(uint32_t server, const char *name) {
 	msg_regs m{};
 	m.word[0] = VFS_OP_UNLINK;
