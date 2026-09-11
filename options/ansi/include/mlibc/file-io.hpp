@@ -90,13 +90,14 @@ protected:
 	virtual int io_seek(off_t offset, int whence, off_t *new_offset) = 0;
 	virtual int post_flush();
 
+	void _reset_type_and_bufmode();
 	int _reset();
 private:
 	int _init_type();
 	int _init_bufmode();
 
 	int _write_back();
-	int _save_pos();
+	int _save_pos(bool &preserve_buffer);
 
 	void _ensure_allocation();
 

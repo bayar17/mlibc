@@ -1163,7 +1163,6 @@ int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t count, int timeout, int
 	auto [offer, send_req, send_tail, recv_resp] = exchangeMsgsSyncCancellable(
 	    getPosixLane(),
 	    req.cancellation_id(),
-	    -1,
 	    helix_ng::offer(
 	        helix_ng::want_lane,
 	        helix_ng::sendBragiHeadTail(req, getSysdepsAllocator()),
@@ -1248,7 +1247,6 @@ int Sysdeps<Ppoll>::operator()(
 	auto [offer, send_req, send_tail, recv_resp] = exchangeMsgsSyncCancellable(
 	    getPosixLane(),
 	    req.cancellation_id(),
-	    -1,
 	    helix_ng::offer(
 	        helix_ng::want_lane,
 	        helix_ng::sendBragiHeadTail(req, getSysdepsAllocator()),
